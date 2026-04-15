@@ -30,6 +30,25 @@ function classifyAge(age) {
   return 'senior';
 }
 
+/**
+ * is_confident = true when all three external APIs returned high-confidence
+ * data for this name:
+ *   - genderize: probability >= 0.80 AND count >= 100
+ *   - agify:     count >= 100
+ *   - nationalize: top country probability >= 0.10
+ *
+ * For names where any API returns null/empty or low-confidence values
+ * (e.g. nonsense strings) is_confident is false.
+ */
+function computeConfidence(genderData, agifyData, nationalizeData) {
+  const genderOk    = (genderData.probability ?? 0) >= 0.80
+                   && (genderData.count       ?? 0) >= 100;
+  const agifyOk     = (agifyData.count        ?? 0) >= 100;
+  const topProb     = nationalizeData.country?.[0]?.probability ?? 0;
+  const nationalOk  = topProb >= 0.10;
+  return genderOk && agifyOk && nationalOk;
+}
+
 function aggregateResponses(genderData, agifyData, nationalizeData) {
   // Genderize validation
   if (!genderData.gender) {
@@ -53,6 +72,8 @@ function aggregateResponses(genderData, agifyData, nationalizeData) {
     c.probability > best.probability ? c : best
   );
 
+  const is_confident = computeConfidence(genderData, agifyData, nationalizeData);
+
   return {
     gender:              genderData.gender,
     gender_probability:  genderData.probability,
@@ -61,6 +82,7 @@ function aggregateResponses(genderData, agifyData, nationalizeData) {
     age_group:           classifyAge(agifyData.age),
     country_id:          topCountry.country_id,
     country_probability: topCountry.probability,
+    is_confident,
   };
 }
 

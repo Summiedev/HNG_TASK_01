@@ -13,6 +13,7 @@ function formatProfile(p) {
     age_group:           p.age_group,
     country_id:          p.country_id,
     country_probability: p.country_probability,
+    is_confident:        p.is_confident,
     created_at:          p.created_at,
   };
 }
