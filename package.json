@@ -2,9 +2,7 @@
   "name": "profile-api",
   "version": "1.0.0",
   "description": "Profile aggregation API — Vercel + MongoDB",
-  "scripts": {
-    "dev": "node app.js"
-  },
+
   "dependencies": {
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
