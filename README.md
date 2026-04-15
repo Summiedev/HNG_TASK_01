@@ -102,14 +102,7 @@ All error responses follow:
 5. **IDs**: UUID v7 (time-ordered, RFC 9562)
 6. **Timestamps**: UTC ISO 8601
 
-## Deployment on Render
 
-1. Push to GitHub
-2. Create a new **Web Service** on [render.com](https://render.com)
-3. Connect your repo
-4. Build command: `npm install`
-5. Start command: `node index.js`
-6. Add a persistent disk mounted at `/app/data` (for SQLite)
 
 ## Project Structure
 
@@ -120,6 +113,5 @@ All error responses follow:
 │   ├── db.js             # SQLite database layer
 │   ├── profileService.js # External API calls & aggregation
 │   └── uuidv7.js         # UUID v7 generator
-├── Dockerfile
 └── package.json
 ```
