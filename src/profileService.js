@@ -24,55 +24,49 @@ async function fetchExternalApis(name) {
 }
 
 function classifyAge(age) {
-  if (age <= 12)  return 'child';
-  if (age <= 19)  return 'teenager';
-  if (age <= 59)  return 'adult';
+  if (age >= 0  && age <= 12) return 'child';
+  if (age >= 13 && age <= 19) return 'teenager';
+  if (age >= 20 && age <= 59) return 'adult';
   return 'senior';
 }
 
-/**
- * is_confident = true when all three external APIs returned high-confidence
- * data for this name:
- *   - genderize: probability >= 0.80 AND count >= 100
- *   - agify:     count >= 100
- *   - nationalize: top country probability >= 0.10
- *
- * For names where any API returns null/empty or low-confidence values
- * (e.g. nonsense strings) is_confident is false.
- */
-function computeConfidence(genderData, agifyData, nationalizeData) {
-  const genderOk    = (genderData.probability ?? 0) >= 0.80
-                   && (genderData.count       ?? 0) >= 100;
-  const agifyOk     = (agifyData.count        ?? 0) >= 100;
-  const topProb     = nationalizeData.country?.[0]?.probability ?? 0;
-  const nationalOk  = topProb >= 0.10;
-  return genderOk && agifyOk && nationalOk;
+// is_confident: true when external APIs return high-confidence data.
+// Nonsense / very rare names typically return null age, null gender, or empty
+// country lists — those are caught before this and return 422.
+// For names that DO pass validation, confidence is based on sample size
+// and probability thresholds.
+function computeIsConfident(genderData, agifyData, nationalizeData) {
+  const genderConfident   = (genderData.probability  ?? 0) >= 0.80
+                         && (genderData.count         ?? 0) >= 100;
+  const agifyConfident    = (agifyData.count          ?? 0) >= 100;
+  const topCountryProb    = nationalizeData.country?.[0]?.probability ?? 0;
+  const nationalConfident = topCountryProb >= 0.10;
+  return genderConfident && agifyConfident && nationalConfident;
 }
 
 function aggregateResponses(genderData, agifyData, nationalizeData) {
-  // Genderize validation
-  if (!genderData.gender) {
+  // Validate Genderize
+  if (!genderData.gender || genderData.gender === null) {
     throw { status: 422, message: 'Genderize returned no gender data for this name' };
   }
   if (!genderData.count || genderData.count === 0) {
     throw { status: 422, message: 'Genderize returned zero sample count for this name' };
   }
 
-  // Agify validation
+  // Validate Agify
   if (agifyData.age === null || agifyData.age === undefined) {
     throw { status: 422, message: 'Agify returned no age data for this name' };
   }
 
-  // Nationalize validation
+  // Validate Nationalize
   if (!nationalizeData.country || nationalizeData.country.length === 0) {
     throw { status: 422, message: 'Nationalize returned no country data for this name' };
   }
 
-  const topCountry = nationalizeData.country.reduce((best, c) =>
+  const topCountry   = nationalizeData.country.reduce((best, c) =>
     c.probability > best.probability ? c : best
   );
-
-  const is_confident = computeConfidence(genderData, agifyData, nationalizeData);
+  const is_confident = computeIsConfident(genderData, agifyData, nationalizeData);
 
   return {
     gender:              genderData.gender,

@@ -9,11 +9,16 @@ module.exports = async function handler(req, res) {
     return res.status(405).json({ status: 'error', message: 'Method not allowed' });
   }
 
-  const { name } = req.query;
+  const rawName = req.query.name;
+  if (!rawName || typeof rawName !== 'string' || rawName.trim() === '') {
+    return res.status(400).json({ status: 'error', message: 'Name is required' });
+  }
+
+  const canonicalName = rawName.trim().toLowerCase();
 
   try {
     const db      = await getDb();
-    const profile = await db.collection('profiles').findOne({ name: name.toLowerCase() });
+    const profile = await db.collection('profiles').findOne({ name: canonicalName });
 
     if (!profile) {
       return res.status(404).json({ status: 'error', message: 'Profile not found' });
@@ -21,7 +26,7 @@ module.exports = async function handler(req, res) {
 
     return res.status(200).json({ status: 'success', data: formatProfile(profile) });
   } catch (err) {
-    console.error(err);
+    console.error('GET /api/profiles/:name error:', err);
     return res.status(500).json({ status: 'error', message: 'Internal server error' });
   }
 };

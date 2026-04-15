@@ -1,8 +1,7 @@
 const { MongoClient } = require('mongodb');
 
-// Reuse connection across warm serverless invocations
 let client = null;
-let db = null;
+let db     = null;
 
 async function getDb() {
   if (db) return db;
@@ -12,13 +11,13 @@ async function getDb() {
 
   client = new MongoClient(uri, {
     serverSelectionTimeoutMS: 5000,
-    connectTimeoutMS: 5000,
+    connectTimeoutMS:         5000,
   });
 
   await client.connect();
   db = client.db(process.env.MONGODB_DB || 'profileapi');
 
-  // Ensure unique index on name for idempotency at DB level
+  // Unique index enforces idempotency at the database level
   await db.collection('profiles').createIndex({ name: 1 }, { unique: true });
 
   return db;
