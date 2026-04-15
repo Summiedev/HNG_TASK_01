@@ -1,46 +1,80 @@
 # Profile API
 
-A REST API that accepts a name, calls Genderize, Agify, and Nationalize APIs in parallel, aggregates the results, and persists them with idempotency.
+Serverless API that accepts a name, calls Genderize, Agify, and Nationalize in parallel, aggregates the response, and stores one canonical profile per name.
 
-## Stack
+## Tech Stack
 
-- **Runtime**: Node.js 20
-- **Framework**: Express
-- **Database**: SQLite via `sql.js` (pure JS, no native bindings)
-- **IDs**: UUID v7 (time-ordered)
+- Runtime: Node.js (package requires Node >= 18)
+- API style: Vercel serverless functions under `api/`
+- Database: MongoDB (`mongodb` driver)
+- IDs: custom UUID v7 generator (`src/uuidv7.js`)
 
-## Quick Start
+## Environment Variables
+
+Create a `.env` file (or configure in Vercel):
+
+```env
+MONGODB_URI=<your-mongodb-connection-string>
+MONGODB_DB=profileapi
+```
+
+`MONGODB_DB` is optional and defaults to `profileapi`.
+
+## Run Locally
+
+Install dependencies:
 
 ```bash
 npm install
-npm start
-# Server runs on http://localhost:3000
 ```
 
-Or with Docker:
+Start with Vercel dev server:
 
 ```bash
-docker build -t profile-api .
-docker run -p 3000:3000 -v $(pwd)/data:/app/data profile-api
+npx vercel dev
 ```
 
-## Endpoints
+Default local URL is usually `http://localhost:3000`.
+
+## API Endpoints
+
+### `GET /api/health`
+
+Health check.
+
+Example response:
+
+```json
+{
+  "status": "ok",
+  "timestamp": "2026-04-15T10:20:30Z"
+}
+```
 
 ### `POST /api/profiles`
 
-Create or retrieve a profile for a given name.
+Creates a profile if it does not exist, otherwise returns existing profile (idempotent by normalized name).
 
-**Request:**
+Request body:
+
 ```json
-{ "name": "ella" }
+{
+  "name": "Ella"
+}
 ```
 
-**Success (201 Created):**
+Notes:
+
+- Input name is normalized to `trim().toLowerCase()` before lookup/storage.
+- A unique index on `profiles.name` enforces idempotency at DB level.
+
+Created response (`201`):
+
 ```json
 {
   "status": "success",
   "data": {
-    "id": "019d8ccd-bd70-7e82-a7d4-d1ad3b3b7b0d",
+    "id": "0195f2a3-8d27-7f12-8b5e-45d2f4e62f13",
     "name": "ella",
     "gender": "female",
     "gender_probability": 0.99,
@@ -49,69 +83,133 @@ Create or retrieve a profile for a given name.
     "age_group": "adult",
     "country_id": "DK",
     "country_probability": 0.085,
-    "created_at": "2026-04-14T12:00:00Z"
+    "created_at": "2026-04-15T10:20:30Z"
   }
 }
 ```
 
-**Already exists (200 OK):**
+Already exists (`200`):
+
 ```json
 {
   "status": "success",
   "message": "Profile already exists",
-  "data": { ... }
+  "data": {
+    "id": "0195f2a3-8d27-7f12-8b5e-45d2f4e62f13",
+    "name": "ella",
+    "gender": "female",
+    "gender_probability": 0.99,
+    "sample_size": 1234,
+    "age": 46,
+    "age_group": "adult",
+    "country_id": "DK",
+    "country_probability": 0.085,
+    "created_at": "2026-04-15T10:20:30Z"
+  }
 }
 ```
 
 ### `GET /api/profiles/:name`
 
-Look up a stored profile by name.
+Fetches a previously stored profile by name.
 
-### `GET /health`
+Success (`200`):
 
-Health check endpoint.
-
-## Validation & Error Handling
-
-| Condition | Status | Message |
-|-----------|--------|---------|
-| Missing/empty `name` | 400 | Name is required |
-| Non-string `name` | 422 | Name must be a string |
-| Genderize returns null gender | 422 | Genderize returned no gender data |
-| Genderize returns count=0 | 422 | Genderize returned zero sample count |
-| Agify returns null age | 422 | Agify returned no age data |
-| Nationalize returns no countries | 422 | Nationalize returned no country data |
-| External API unreachable | 502 | Failed to connect to external API |
-| Server error | 500 | Internal server error |
-
-All error responses follow:
 ```json
-{ "status": "error", "message": "..." }
+{
+  "status": "success",
+  "data": {
+    "id": "0195f2a3-8d27-7f12-8b5e-45d2f4e62f13",
+    "name": "ella",
+    "gender": "female",
+    "gender_probability": 0.99,
+    "sample_size": 1234,
+    "age": 46,
+    "age_group": "adult",
+    "country_id": "DK",
+    "country_probability": 0.085,
+    "created_at": "2026-04-15T10:20:30Z"
+  }
+}
 ```
 
-## Processing Rules
+Not found (`404`):
 
-1. **Genderize**: extracts `gender`, `probability` → `gender_probability`, `count` → `sample_size`
-2. **Agify**: extracts `age`, classifies into `age_group`:
-   - 0–12 → `child`
-   - 13–19 → `teenager`
-   - 20–59 → `adult`
-   - 60+ → `senior`
-3. **Nationalize**: picks the country with highest `probability` as `country_id`
-4. **Idempotency**: same name returns existing record with `"message": "Profile already exists"`
-5. **IDs**: UUID v7 (time-ordered, RFC 9562)
-6. **Timestamps**: UTC ISO 8601
+```json
+{
+  "status": "error",
+  "message": "Profile not found"
+}
+```
 
+## Validation and Error Handling
 
+POST `/api/profiles`:
+
+- `400` `Name is required` when name is missing, null, or empty string.
+- `422` `Name must be a string` when name is not a string.
+- `422` when external data is incomplete:
+  - `Genderize returned no gender data for this name`
+  - `Genderize returned zero sample count for this name`
+  - `Agify returned no age data for this name`
+  - `Nationalize returned no country data for this name`
+- `502` `Failed to reach external API` when external API request fails.
+- `500` `Internal server error` for unhandled errors.
+
+Method restrictions:
+
+- `/api/profiles` supports `POST` and `OPTIONS`.
+- `/api/profiles/:name` supports `GET` and `OPTIONS`.
+- Unsupported methods return `405` with `Method not allowed`.
+
+All non-health errors follow:
+
+```json
+{
+  "status": "error",
+  "message": "..."
+}
+```
+
+## Aggregation Rules
+
+The service combines external API results into one profile:
+
+1. Genderize:
+   - `gender`
+   - `probability` -> `gender_probability`
+   - `count` -> `sample_size`
+2. Agify:
+   - `age`
+   - derived `age_group`:
+     - `0-12` -> `child`
+     - `13-19` -> `teenager`
+     - `20-59` -> `adult`
+     - `60+` -> `senior`
+3. Nationalize:
+   - selects highest probability country as `country_id`
+   - stores that probability as `country_probability`
+
+## CORS
+
+All handlers set:
+
+- `Access-Control-Allow-Origin: *`
+- `Access-Control-Allow-Methods: GET, POST, OPTIONS`
+- `Access-Control-Allow-Headers: Content-Type`
 
 ## Project Structure
 
-```
-├── index.js              # Entry point
-├── src/
-│   ├── app.js            # Express app & routes
-│   ├── db.js             # SQLite database layer
-│   ├── profileService.js # External API calls & aggregation
-│   └── uuidv7.js         # UUID v7 generator
-└── package.json
+```text
+api/
+  health.js
+  profiles/
+    index.js      # POST /api/profiles
+    [name].js     # GET /api/profiles/:name
+src/
+  db.js           # Mongo connection + unique index creation
+  helpers.js      # CORS, UTC timestamp, response formatting
+  profileService.js
+  uuidv7.js
+package.json
 ```
