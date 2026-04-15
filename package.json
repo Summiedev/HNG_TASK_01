@@ -1,19 +1,14 @@
 {
   "name": "profile-api",
   "version": "1.0.0",
-  "description": "Profile aggregation API using Genderize, Agify, Nationalize",
-  "main": "index.js",
+  "description": "Profile aggregation API — Vercel + MongoDB",
   "scripts": {
-    "start": "node index.js",
-    "dev": "node index.js"
+    "dev": "node app.js"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
   "dependencies": {
+    "dotenv": "^17.4.2",
     "express": "^5.2.1",
-    "node-fetch": "^2.7.0",
-    "sql.js": "^1.14.1"
+    "mongodb": "^6.0.0"
   },
   "engines": {
     "node": ">=18"

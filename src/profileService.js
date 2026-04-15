@@ -1,50 +1,38 @@
-const fetch = require('node-fetch');
+const https = require('https');
 
-const GENDERIZE_URL = 'https://api.genderize.io';
-const AGIFY_URL = 'https://api.agify.io';
-const NATIONALIZE_URL = 'https://api.nationalize.io';
+function httpsGet(url) {
+  return new Promise((resolve, reject) => {
+    https.get(url, (res) => {
+      let data = '';
+      res.on('data', chunk => (data += chunk));
+      res.on('end', () => {
+        try { resolve(JSON.parse(data)); }
+        catch (e) { reject(new Error('Invalid JSON from ' + url)); }
+      });
+    }).on('error', reject);
+  });
+}
 
-/**
- * Call all three external APIs in parallel
- */
 async function fetchExternalApis(name) {
-  const [genderRes, agifyRes, nationalizeRes] = await Promise.all([
-    fetch(`${GENDERIZE_URL}?name=${encodeURIComponent(name)}`),
-    fetch(`${AGIFY_URL}?name=${encodeURIComponent(name)}`),
-    fetch(`${NATIONALIZE_URL}?name=${encodeURIComponent(name)}`),
-  ]);
-
-  if (!genderRes.ok) throw { status: 502, message: 'Genderize API error' };
-  if (!agifyRes.ok) throw { status: 502, message: 'Agify API error' };
-  if (!nationalizeRes.ok) throw { status: 502, message: 'Nationalize API error' };
-
+  const encoded = encodeURIComponent(name);
   const [genderData, agifyData, nationalizeData] = await Promise.all([
-    genderRes.json(),
-    agifyRes.json(),
-    nationalizeRes.json(),
+    httpsGet(`https://api.genderize.io/?name=${encoded}`),
+    httpsGet(`https://api.agify.io/?name=${encoded}`),
+    httpsGet(`https://api.nationalize.io/?name=${encoded}`),
   ]);
-
   return { genderData, agifyData, nationalizeData };
 }
 
-/**
- * Classify age into groups
- */
 function classifyAge(age) {
-  if (age >= 0 && age <= 12) return 'child';
-  if (age >= 13 && age <= 19) return 'teenager';
-  if (age >= 20 && age <= 59) return 'adult';
-  if (age >= 60) return 'senior';
-  return null;
+  if (age <= 12)  return 'child';
+  if (age <= 19)  return 'teenager';
+  if (age <= 59)  return 'adult';
+  return 'senior';
 }
 
-/**
- * Aggregate and validate external API responses
- * Returns processed profile data or throws an error object
- */
 function aggregateResponses(genderData, agifyData, nationalizeData) {
   // Genderize validation
-  if (!genderData.gender || genderData.gender === null) {
+  if (!genderData.gender) {
     throw { status: 422, message: 'Genderize returned no gender data for this name' };
   }
   if (!genderData.count || genderData.count === 0) {
@@ -61,21 +49,17 @@ function aggregateResponses(genderData, agifyData, nationalizeData) {
     throw { status: 422, message: 'Nationalize returned no country data for this name' };
   }
 
-  // Pick highest-probability country
   const topCountry = nationalizeData.country.reduce((best, c) =>
     c.probability > best.probability ? c : best
   );
 
-  const age = agifyData.age;
-  const age_group = classifyAge(age);
-
   return {
-    gender: genderData.gender,
-    gender_probability: genderData.probability,
-    sample_size: genderData.count,
-    age,
-    age_group,
-    country_id: topCountry.country_id,
+    gender:              genderData.gender,
+    gender_probability:  genderData.probability,
+    sample_size:         genderData.count,
+    age:                 agifyData.age,
+    age_group:           classifyAge(agifyData.age),
+    country_id:          topCountry.country_id,
     country_probability: topCountry.probability,
   };
 }
