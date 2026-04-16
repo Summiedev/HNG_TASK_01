@@ -1,37 +1,33 @@
-const { getDb }                                  = require('../../src/db');
-const { fetchExternalApis, aggregateResponses }  = require('../../src/profileService');
-const { uuidv7 }                                 = require('../../src/uuidv7');
-const { utcNow, formatProfile, setCors }         = require('../../src/helpers');
+const { getDb }                                 = require('../../src/db');
+const { fetchExternalApis, aggregateResponses } = require('../../src/profileService');
+const { uuidv7 }                                = require('../../src/uuidv7');
+const { utcNow, formatProfile, setCors }        = require('../../src/helpers');
 
 module.exports = async function handler(req, res) {
   setCors(res);
-
-  // CORS preflight
   if (req.method === 'OPTIONS') return res.status(204).end();
 
-  // ── GET /api/profiles?name=<n>  (lookup) ─────────────────────────────────
+  // ── GET /api/profiles  (list, with optional filters) ─────────────────────
   if (req.method === 'GET') {
-    const name = req.query.name;
-
-    // Non-string check (query params are always strings in HTTP, but guard anyway)
-    if (name !== undefined && name !== null && typeof name !== 'string') {
-      return res.status(422).json({ status: 'error', message: 'Name must be a string' });
-    }
-    if (!name || (typeof name === 'string' && name.trim() === '')) {
-      return res.status(400).json({ status: 'error', message: 'Name is required' });
-    }
-
-    const canonicalName = name.trim().toLowerCase();
-
     try {
-      const db      = await getDb();
-      const profile = await db.collection('profiles').findOne({ name: canonicalName });
+      const db         = await getDb();
+      const collection = db.collection('profiles');
 
-      if (!profile) {
-        return res.status(404).json({ status: 'error', message: 'Profile not found' });
-      }
+      // Build filter from supported query params
+      const query = {};
+      const { gender, age_group, country_id, name } = req.query;
 
-      return res.status(200).json({ status: 'success', data: formatProfile(profile) });
+      if (name)       query.name       = name.trim().toLowerCase();
+      if (gender)     query.gender     = gender.trim().toLowerCase();
+      if (age_group)  query.age_group  = age_group.trim().toLowerCase();
+      if (country_id) query.country_id = country_id.trim().toUpperCase();
+
+      const profiles = await collection.find(query).sort({ created_at: -1 }).toArray();
+
+      return res.status(200).json({
+        status: 'success',
+        data:   profiles.map(formatProfile),
+      });
     } catch (err) {
       console.error('GET /api/profiles error:', err);
       return res.status(500).json({ status: 'error', message: 'Internal server error' });
@@ -40,15 +36,13 @@ module.exports = async function handler(req, res) {
 
   // ── POST /api/profiles  (create) ─────────────────────────────────────────
   if (req.method === 'POST') {
-    // Accept name from JSON body; also fall back to query string for lenient graders
     const rawName = (req.body ?? {}).name ?? req.query.name;
 
-    // Non-string type check
     if (rawName !== undefined && rawName !== null && typeof rawName !== 'string') {
       return res.status(422).json({ status: 'error', message: 'Name must be a string' });
     }
-    // Missing or empty
-    if (rawName === undefined || rawName === null || (typeof rawName === 'string' && rawName.trim() === '')) {
+    if (rawName === undefined || rawName === null ||
+        (typeof rawName === 'string' && rawName.trim() === '')) {
       return res.status(400).json({ status: 'error', message: 'Name is required' });
     }
 
@@ -58,7 +52,7 @@ module.exports = async function handler(req, res) {
       const db         = await getDb();
       const collection = db.collection('profiles');
 
-      // ── Idempotency check ────────────────────────────────────────────────
+      // Idempotency
       const existing = await collection.findOne({ name: canonicalName });
       if (existing) {
         return res.status(200).json({
@@ -68,7 +62,7 @@ module.exports = async function handler(req, res) {
         });
       }
 
-      // ── Call external APIs ───────────────────────────────────────────────
+      // External APIs
       let genderData, agifyData, nationalizeData;
       try {
         ({ genderData, agifyData, nationalizeData } = await fetchExternalApis(canonicalName));
@@ -77,7 +71,7 @@ module.exports = async function handler(req, res) {
         return res.status(502).json({ status: 'error', message: 'Failed to reach external API' });
       }
 
-      // ── Aggregate & validate ─────────────────────────────────────────────
+      // Aggregate & validate
       let aggregated;
       try {
         aggregated = aggregateResponses(genderData, agifyData, nationalizeData);
@@ -85,7 +79,7 @@ module.exports = async function handler(req, res) {
         return res.status(err.status || 422).json({ status: 'error', message: err.message });
       }
 
-      // ── Build document ───────────────────────────────────────────────────
+      // Build & persist
       const profile = {
         id:         uuidv7(),
         name:       canonicalName,
@@ -93,11 +87,9 @@ module.exports = async function handler(req, res) {
         created_at: utcNow(),
       };
 
-      // ── Persist ──────────────────────────────────────────────────────────
       try {
         await collection.insertOne({ ...profile, _id: profile.id });
       } catch (err) {
-        // Duplicate key: race condition between idempotency check and insert
         if (err.code === 11000) {
           const race = await collection.findOne({ name: canonicalName });
           return res.status(200).json({
@@ -117,6 +109,5 @@ module.exports = async function handler(req, res) {
     }
   }
 
-  // ── Any other method ──────────────────────────────────────────────────────
   return res.status(405).json({ status: 'error', message: 'Method not allowed' });
 };
